@@ -1,0 +1,457 @@
+.game {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-dark);
+  animation: fadeIn 0.6s ease-out;
+}
+
+.game-hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 1024px;
+  padding: 20px 0;
+  font-family: 'JetBrains Mono', monospace;
+  gap: 20px;
+}
+
+.hud-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.hud-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.room-info {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.room-info::before {
+  content: '◆ ';
+  color: var(--accent-primary);
+}
+
+.inventory {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inventory-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.inventory-empty {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.inventory-item {
+  padding: 4px 12px;
+  background: rgba(57, 255, 20, 0.1);
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  animation: itemPop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes itemPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.interaction-prompt {
+  padding: 8px 16px;
+  background: rgba(57, 255, 20, 0.1);
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.mission-brief {
+  background: rgba(57, 255, 20, 0.05);
+  border-left: 2px solid var(--accent-primary);
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.mission-brief h3 {
+  font-family: 'Crimson Pro', serif;
+  font-size: 1.3rem;
+  font-weight: 300;
+  color: var(--accent-primary);
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.mission-brief p {
+  font-family: 'Crimson Pro', serif;
+  font-size: 15px;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+.objectives {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.objective {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding-left: 20px;
+  position: relative;
+}
+
+.objective::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--accent-primary);
+}
+
+.game-over-screen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.8s ease-out;
+}
+
+.game-over-container {
+  position: relative;
+  background: var(--bg-mid);
+  border: 1px solid var(--border);
+  padding: 60px 50px;
+  min-width: 500px;
+  text-align: center;
+  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.game-over-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-primary) 50%, transparent 100%);
+}
+
+.game-over-container h1 {
+  font-family: 'Crimson Pro', serif;
+  font-size: 3rem;
+  font-weight: 300;
+  color: var(--accent-primary);
+  margin-bottom: 20px;
+  letter-spacing: -0.02em;
+}
+
+.game-over-container p {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 40px;
+  letter-spacing: 0.05em;
+}
+
+.btn-leave-game {
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-leave-game:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+canvas {
+  border: 1px solid var(--border);
+  box-shadow: 
+    0 0 0 1px var(--bg-mid),
+    0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: canvasFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+
+@keyframes canvasFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.waiting-room {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.8s ease-out;
+}
+
+.waiting-container {
+  background: var(--bg-mid);
+  border: 1px solid var(--border);
+  padding: 60px 50px;
+  min-width: 480px;
+  position: relative;
+  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.waiting-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    var(--accent-primary) 50%, 
+    transparent 100%);
+  animation: pulse 3s ease-in-out infinite;
+}
+
+.waiting-container h2 {
+  margin-bottom: 12px;
+  font-size: 2.2rem;
+  font-weight: 300;
+  color: var(--text-primary);
+  font-family: 'Crimson Pro', serif;
+  letter-spacing: -0.02em;
+}
+
+.waiting-container p {
+  margin-bottom: 32px;
+  font-size: 14px;
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.05em;
+}
+
+.player-list {
+  background: transparent;
+  border-left: 1px solid var(--border);
+  padding: 0 0 0 20px;
+  margin: 32px 0;
+}
+
+.player-item {
+  padding: 12px 0;
+  margin: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  animation: slideInLeft 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.player-item:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.player-item:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.player-item:last-child {
+  border-bottom: none;
+}
+
+.waiting-text {
+  font-style: normal;
+  color: var(--text-dim);
+  margin: 24px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  animation: blink 2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.waiting-text::before {
+  content: '▸ ';
+  color: var(--accent-primary);
+}
+
+.btn-start {
+  padding: 18px 0;
+  width: 100%;
+  background: transparent;
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: 10px 0;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-start::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: var(--accent-primary);
+  transition: left 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: -1;
+}
+
+.btn-start:hover::before {
+  left: 0;
+}
+
+.btn-start:hover {
+  color: var(--bg-dark);
+  transform: translateY(-1px);
+}
+
+.btn-leave {
+  padding: 18px 0;
+  width: 100%;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: 10px 0;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.btn-leave:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+/* Win screen animations */
+.win-icon {
+  animation: bounceIn 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes bounceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(-20deg);
+  }
+  50% {
+    transform: scale(1.1) rotate(10deg);
+  }
+  70% {
+    transform: scale(0.9) rotate(-5deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes float {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(-100vh) rotate(360deg);
+    opacity: 0;
+  }
+}
+
