@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import './NPCChat.css';
 
-function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
+function NPCChat({ socket, roomCode, npcId, npcName, location, onClose, username }) {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [forceUpdate, setForceUpdate] = useState(0);
   const messagesEndRef = useRef(null);
   const npcIdRef = useRef(npcId);
 
@@ -16,46 +15,74 @@ function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
 
   // Emit enterNPCChat when component mounts to get initial history
   useEffect(() => {
-    console.log('NPCChat mounted, entering chat for:', npcId);
+    console.log('🎬 NPCChat mounted for', npcId);
     socket.emit('enterNPCChat', { roomCode, npcId });
+    return () => {
+      console.log('💀 NPCChat unmounting for', npcId);
+    };
   }, [socket, roomCode, npcId]);
 
   // Set up socket event listeners - MUST stay active while component is mounted
   useEffect(() => {
-    console.log('Setting up socket event listeners for', npcId);
-    
     // Listen for initial conversation history
     function handleChatEntered(data) {
-      console.log('EVENT RECEIVED: npcChatEntered', data);
+      console.log('📚 Chat history received:', data);
       const { npcId: enteredNpcId, conversationHistory } = data;
       if (enteredNpcId === npcIdRef.current && conversationHistory) {
-        console.log('Setting initial messages:', conversationHistory.length);
-        setMessages([...conversationHistory]); // Force new array
-        setForceUpdate(prev => prev + 1); // Force re-render
+        console.log('📖 Loading', conversationHistory.length, 'history messages');
+        // Add unique IDs to history messages if they don't have them
+        const messagesWithIds = conversationHistory.map((msg, idx) => ({
+          ...msg,
+          id: msg.id || `history-${msg.timestamp}-${idx}`
+        }));
+        setMessages(messagesWithIds);
       }
     }
 
     // Listen for NPC messages
     function handleNPCMessage(data) {
-      console.log('EVENT RECEIVED: npcMessageReceived', data);
+      console.log('📨 Message received:', data);
       const { npcId: msgNpcId, sender, message, isNPC, timestamp } = data;
+      console.log('🔍 Checking NPC match:', msgNpcId, '===', npcIdRef.current, '?', msgNpcId === npcIdRef.current);
       if (msgNpcId === npcIdRef.current) {
-        console.log('Adding message to state');
+        const newMsg = { 
+          id: `${Date.now()}-${Math.random()}`,
+          sender, 
+          message, 
+          isNPC, 
+          timestamp: timestamp || Date.now() 
+        };
+        console.log('✅ Adding message to state:', newMsg);
         setMessages(prev => {
-          const newMsg = { sender, message, isNPC, timestamp: timestamp || Date.now() };
+          console.log('📦 Current messages before adding:', prev.length);
+          // Skip if this looks like a duplicate of the last message (within 2 seconds)
+          const lastMsg = prev[prev.length - 1];
+          console.log('🔍 Last message:', lastMsg);
+          console.log('🔍 New message:', { message, isNPC, sender });
+          
+          if (lastMsg && 
+              lastMsg.message === message && 
+              !isNPC && 
+              Date.now() - lastMsg.timestamp < 2000) {
+            console.log('⏭️ Skipping duplicate player message (same text, not NPC, within 2s)');
+            return prev;
+          }
+          
           const updated = [...prev, newMsg];
-          console.log('Updated messages array:', updated);
+          console.log('📊 Total messages after update:', updated.length);
           return updated;
         });
-        setForceUpdate(prev => prev + 1); // Force re-render
+      } else {
+        console.log('❌ Message not for this NPC, ignoring');
       }
     }
 
     // Listen for typing indicator
     function handleNPCTyping(data) {
-      console.log('EVENT RECEIVED: npcTyping', data);
+      console.log('⌨️ Typing status:', data);
       const { npcId: typingNpcId, isTyping: typing } = data;
       if (typingNpcId === npcIdRef.current) {
+        console.log('✏️ Setting typing to:', typing);
         setIsTyping(typing);
       }
     }
@@ -63,19 +90,17 @@ function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
     // Handle Escape key to close chat
     function handleEscapeKey(e) {
       if (e.key === 'Escape') {
+        console.log('⌨️ ESC pressed, closing chat');
         onClose();
       }
     }
 
-    console.log('Registering socket listeners...');
     socket.on('npcChatEntered', handleChatEntered);
     socket.on('npcMessageReceived', handleNPCMessage);
     socket.on('npcTyping', handleNPCTyping);
     window.addEventListener('keydown', handleEscapeKey);
-    console.log('Socket listeners registered!');
 
     return () => {
-      console.log('Cleaning up socket listeners');
       socket.off('npcChatEntered', handleChatEntered);
       socket.off('npcMessageReceived', handleNPCMessage);
       socket.off('npcTyping', handleNPCTyping);
@@ -86,22 +111,34 @@ function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, forceUpdate]);
+  }, [messages]);
 
-  // Debug: Log when messages change
+  // Debug: Log when messages state updates
   useEffect(() => {
-    console.log('Messages state updated, count:', messages.length, 'messages:', messages);
-  }, [messages, forceUpdate]);
+    console.log('🔄 Messages state changed, rendering', messages.length, 'messages');
+  }, [messages]);
 
   const sendMessage = () => {
     if (!inputMessage.trim()) return;
-
-    console.log('Sending message:', inputMessage);
+    
+    const messageText = inputMessage;
+    console.log('📤 Sending message:', messageText);
+    
+    // Immediately add player's message to UI (optimistic update)
+    const playerMsg = {
+      id: `player-${Date.now()}-${Math.random()}`,
+      sender: username,
+      message: messageText,
+      isNPC: false,
+      timestamp: Date.now()
+    };
+    console.log('💬 Adding optimistic message:', playerMsg);
+    setMessages(prev => [...prev, playerMsg]);
     
     socket.emit('sendNPCMessage', {
       roomCode,
       npcId,
-      message: inputMessage
+      message: messageText
     });
 
     setInputMessage('');
@@ -118,6 +155,7 @@ function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
     <div className="npc-chat-overlay" onClick={(e) => {
       // Close if clicking on overlay (not the container)
       if (e.target.className === 'npc-chat-overlay') {
+        console.log('🖱️ Clicked overlay, closing chat');
         onClose();
       }
     }}>
@@ -125,12 +163,12 @@ function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
         <div className="npc-chat-header">
           <div className="npc-info">
             <div className="npc-name">{npcName}</div>
-            <div className="npc-location">{location}</div>
+            <div className="npc-location">{location} • {messages.length} msgs</div>
           </div>
-          <button className="close-btn" onClick={onClose} title="Close (ESC)">✕</button>
+          <button className="close-btn" onClick={() => { console.log('❌ Close button clicked'); onClose(); }} title="Close (ESC)">✕</button>
         </div>
 
-        <div className="npc-chat-messages" key={forceUpdate}>
+        <div className="npc-chat-messages">
           {messages.length === 0 && (
             <div style={{ color: '#666', textAlign: 'center', padding: '20px' }}>
               No messages yet. Say hello!
@@ -138,7 +176,7 @@ function NPCChat({ socket, roomCode, npcId, npcName, location, onClose }) {
           )}
           {messages.map((msg, idx) => (
             <div 
-              key={`${msg.timestamp}-${idx}`}
+              key={msg.id || `${msg.timestamp}-${idx}`}
               className={`message ${msg.isNPC ? 'npc-message' : 'player-message'}`}
             >
               <div className="message-sender">{msg.sender}</div>

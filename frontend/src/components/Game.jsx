@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { socket } from './Lobby';
 import NPCChat from './NPCChat';
 import './Game.css';
@@ -8,23 +8,38 @@ const NPC_ZONES = {
   hardwareClerk: { 
     x: 2842, 
     y: 872, 
-    radius: 50, 
+    radius: 1, // Small radius - only used for positioning
     name: 'Hardware Store',
-    color: '#ff4444'
+    color: '#ff4444',
+    spriteRow: 0, // Which sprite row to use (0 = idle down, 7 = up, etc.)
+    spriteOffset: { x: 0, y: 0 } // Offset to fine-tune sprite position
   },
   policeOfficer: { 
     x: 4106, 
     y: 4306, 
-    radius: 50, 
+    radius: 1, // Small radius - only used for positioning
     name: 'Police Station',
-    color: '#4444ff'
+    color: '#4444ff',
+    spriteRow: 0,
+    spriteOffset: { x: 0, y: 0 }
   },
   borderGuard: { 
     x: 730, 
     y: 4992, 
-    radius: 50, 
+    radius: 1, // Small radius - only used for positioning
     name: 'Border Patrol',
-    color: '#ff8800'
+    color: '#ff8800',
+    spriteRow: 0,
+    spriteOffset: { x: 0, y: 0 }
+  },
+  exitGuard: {
+    x: 674,
+    y: 1616,
+    radius: 1, // Small radius - only used for positioning
+    name: 'Exit Checkpoint',
+    color: '#ff8800',
+    spriteRow: 0,
+    spriteOffset: { x: 0, y: 0 }
   }
 };
 
@@ -64,10 +79,17 @@ const ACTION_ZONES = {
 
 function Game({ roomCode, username, isHost, onLeave }) {
   const canvasRef = useRef(null);
+  const audioRef = useRef(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [players, setPlayers] = useState({});
   const [waitingForPlayers, setWaitingForPlayers] = useState(true);
   const [activeNPC, setActiveNPC] = useState(null);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  
+  // Debug: log activeNPC changes
+  useEffect(() => {
+    console.log('🎯 activeNPC changed to:', activeNPC);
+  }, [activeNPC]);
   const [inventory, setInventory] = useState([]);
   const [gameOver, setGameOver] = useState(null);
   const [nearbyNPC, setNearbyNPC] = useState(null);
@@ -75,6 +97,13 @@ function Game({ roomCode, username, isHost, onLeave }) {
   const [completedActions, setCompletedActions] = useState([]);
   const [winningAction, setWinningAction] = useState(null);
   const [winningPlayer, setWinningPlayer] = useState(null);
+  
+  // Refs to access current values without restarting animation loop
+  const inventoryRef = useRef([]);
+  const completedActionsRef = useRef([]);
+  const nearbyNPCRef = useRef(null);
+  const nearbyActionRef = useRef(null);
+  const activeNPCRef = useRef(null);
   
   const gameStateRef = useRef({
     background: { x: -2370, y: -2600 },
@@ -106,7 +135,9 @@ function Game({ roomCode, username, isHost, onLeave }) {
       setPlayers(room.players);
       gameStateRef.current.otherPlayers = { ...room.players };
       delete gameStateRef.current.otherPlayers[socket.id];
-      setInventory(room.sharedInventory || []);
+      const inv = room.sharedInventory || [];
+      inventoryRef.current = inv;
+      setInventory(inv);
     });
 
     socket.on('playerMoved', ({ playerId, position, sprite, moving }) => {
@@ -127,12 +158,20 @@ function Game({ roomCode, username, isHost, onLeave }) {
     });
 
     socket.on('itemReceived', ({ item, from }) => {
-      setInventory(prev => [...prev, item]);
+      setInventory(prev => {
+        const updated = [...prev, item];
+        inventoryRef.current = updated;
+        return updated;
+      });
       showNotification(`Received ${item} from ${from}!`);
     });
 
     socket.on('actionCompleted', ({ action, message, completedBy }) => {
-      setCompletedActions(prev => [...prev, action]);
+      setCompletedActions(prev => {
+        const updated = [...prev, action];
+        completedActionsRef.current = updated;
+        return updated;
+      });
       setWinningAction(action);
       setWinningPlayer(completedBy);
       showNotification(message);
@@ -167,8 +206,8 @@ function Game({ roomCode, username, isHost, onLeave }) {
         Math.pow(worldX - centerX, 2) + 
         Math.pow(worldY - centerY, 2)
       );
-      // Increased detection range to 100 pixels for easier interaction
-      if (distance < zone.radius + 100) {
+      // Detection range: 100 pixels from NPC center
+      if (distance < 100) {
         return { npcId, name: zone.name };
       }
     }
@@ -186,8 +225,8 @@ function Game({ roomCode, username, isHost, onLeave }) {
       );
       // Increased detection range to 100 pixels for easier interaction
       if (distance < zone.radius + 100) {
-        const hasItem = inventory.includes(zone.requiredItem);
-        const isCompleted = completedActions.includes(actionId);
+        const hasItem = inventoryRef.current.includes(zone.requiredItem);
+        const isCompleted = completedActionsRef.current.includes(actionId);
         return { 
           actionId, 
           name: zone.name, 
@@ -207,13 +246,13 @@ function Game({ roomCode, username, isHost, onLeave }) {
     if (!action) return;
 
     // Check if player has required item
-    if (!inventory.includes(action.requiredItem)) {
+    if (!inventoryRef.current.includes(action.requiredItem)) {
       showNotification(`You need a ${action.requiredItem} to ${action.action} here!`);
       return;
     }
 
     // Check if already completed
-    if (completedActions.includes(actionId)) {
+    if (completedActionsRef.current.includes(actionId)) {
       showNotification('You already completed this action!');
       return;
     }
@@ -227,13 +266,47 @@ function Game({ roomCode, username, isHost, onLeave }) {
     console.log('NOTIFICATION:', message);
   };
 
+  const closeNPCChat = useCallback(() => {
+    console.log('🚪 NPCChat close callback called');
+    activeNPCRef.current = null;
+    setActiveNPC(null);
+  }, []);
+
+  // Background music control
+  const toggleMusic = () => {
+    if (!audioRef.current) return;
+    
+    if (isMusicPlaying) {
+      audioRef.current.pause();
+      setIsMusicPlaying(false);
+    } else {
+      audioRef.current.play().catch(err => {
+        console.log('Audio play prevented:', err);
+      });
+      setIsMusicPlaying(true);
+    }
+  };
+
+  // Start music when game starts
+  useEffect(() => {
+    if (gameStarted && audioRef.current && !isMusicPlaying) {
+      // Try to autoplay (might be blocked by browser)
+      audioRef.current.play().catch(err => {
+        console.log('Autoplay prevented - user must click to start music');
+      });
+      setIsMusicPlaying(true);
+    }
+  }, [gameStarted]);
+
   const enterNPCChat = (npcId) => {
     // Clear all movement keys when entering chat
     const state = gameStateRef.current;
     state.keys = { w: false, a: false, s: false, d: false };
     state.lastKey = '';
     
+    console.log('🚪 enterNPCChat called with:', npcId);
     // Just set the active NPC, the NPCChat component will handle the socket emit
+    activeNPCRef.current = npcId;
     setActiveNPC(npcId);
   };
 
@@ -255,8 +328,39 @@ function Game({ roomCode, username, isHost, onLeave }) {
     
     const playerImage = new Image();
     playerImage.src = '/img/ninja.png';
+    
+    // NPC sprites - custom images for each NPC
+    const npcImage = new Image();
+    npcImage.src = '/img/ninja.png';
+    
+    // Load specific NPC images
+    const hardwareClerkImage = new Image();
+    hardwareClerkImage.src = '/img/blonde_man.png';
+    
+    const policeOfficerImage = new Image();
+    policeOfficerImage.src = '/img/policeman.png';
+    
+    const borderGuardImage = new Image();
+    borderGuardImage.src = '/img/soldier.png';
+    
+    const exitGuardImage = new Image();
+    exitGuardImage.src = '/img/soldier.png';
 
-    state.images = { mapImage, foregroundImage, playerImage };
+    state.images = { 
+      mapImage, 
+      foregroundImage, 
+      playerImage, 
+      npcImage 
+    };
+    
+    // Store custom images per NPC
+    state.images.npcImages = {
+      default: npcImage,
+      hardwareClerk: hardwareClerkImage,
+      policeOfficer: policeOfficerImage,
+      borderGuard: borderGuardImage,
+      exitGuard: exitGuardImage
+    };
 
     fetch('/data/collisions.js')
       .then(res => res.text())
@@ -295,24 +399,24 @@ function Game({ roomCode, username, isHost, onLeave }) {
 
     const handleKeyDown = (e) => {
       // Don't process movement keys if chat is open
-      if (activeNPC) return;
+      if (activeNPCRef.current) return;
       
       const key = e.key.toLowerCase();
       if (['w', 'a', 's', 'd'].includes(key)) {
         state.keys[key] = true;
         state.lastKey = key;
       }
-      if (key === 'e' && nearbyNPC) {
-        enterNPCChat(nearbyNPC.npcId);
+      if (key === 'e' && nearbyNPCRef.current) {
+        enterNPCChat(nearbyNPCRef.current.npcId);
       }
-      if (key === 'f' && nearbyAction && !nearbyAction.isCompleted) {
-        performAction(nearbyAction.actionId);
+      if (key === 'f' && nearbyActionRef.current && !nearbyActionRef.current.isCompleted) {
+        performAction(nearbyActionRef.current.actionId);
       }
     };
 
     const handleKeyUp = (e) => {
       // Don't process movement keys if chat is open
-      if (activeNPC) return;
+      if (activeNPCRef.current) return;
       
       const key = e.key.toLowerCase();
       if (['w', 'a', 's', 'd'].includes(key)) {
@@ -356,52 +460,64 @@ function Game({ roomCode, username, isHost, onLeave }) {
         context.drawImage(state.images.mapImage, state.background.x, state.background.y);
       }
 
-      // Draw NPCs as circles
+      // Draw NPCs as sprites
       Object.entries(NPC_ZONES).forEach(([npcId, zone]) => {
         const centerX = zone.x + zone.radius;
         const centerY = zone.y + zone.radius;
         const screenX = centerX + state.background.x;
         const screenY = centerY + state.background.y;
         
-        // Draw outer glow
-        const gradient = context.createRadialGradient(
-          screenX, screenY, 0,
-          screenX, screenY, zone.radius + 20
-        );
-        gradient.addColorStop(0, zone.color + '40');
-        gradient.addColorStop(0.7, zone.color + '20');
-        gradient.addColorStop(1, 'transparent');
+        // Draw NPC sprite (with idle animation)
+        // Try to use custom sprite for this NPC, otherwise use default
+        const npcSpriteImage = state.images.npcImages?.[npcId] || state.images.npcImage;
         
-        context.fillStyle = gradient;
-        context.beginPath();
-        context.arc(screenX, screenY, zone.radius + 20, 0, Math.PI * 2);
-        context.fill();
+        if (npcSpriteImage.complete) {
+          const spriteWidth = 32;
+          const spriteHeight = 32;
+          const scale = 4;
+          
+          // Idle animation: slight bobbing
+          const bobOffset = Math.sin(state.frameCount * 0.03) * 3;
+          
+          // Draw NPC sprite with idle animation
+          // Calculate sprite frame based on frameCount for idle animation
+          const idleFrame = Math.floor((state.frameCount / 20) % 4);
+          
+          const spriteRow = zone.spriteRow || 0;
+          
+          const spriteY = screenY - spriteHeight * scale - 10 + bobOffset + zone.spriteOffset.y;
+          
+          // Draw shadow
+          context.fillStyle = 'rgba(0, 0, 0, 0.3)';
+          context.beginPath();
+          context.ellipse(
+            screenX, spriteY + scale * spriteHeight + 5,
+            scale * spriteWidth * 0.4, scale * spriteHeight * 0.2,
+            0, 0, Math.PI * 2
+          );
+          context.fill();
+          
+          context.drawImage(
+            npcSpriteImage,
+            idleFrame * spriteWidth,
+            spriteRow * spriteHeight,
+            spriteWidth,
+            spriteHeight,
+            screenX - (spriteWidth * scale) / 2 + zone.spriteOffset.x,
+            spriteY,
+            spriteWidth * scale,
+            spriteHeight * scale
+          );
+        }
         
-        // Draw main circle
-        context.fillStyle = zone.color;
-        context.beginPath();
-        context.arc(screenX, screenY, zone.radius, 0, Math.PI * 2);
-        context.fill();
+        // Draw name above (with background for readability)
+        context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        context.fillRect(screenX - 80, screenY - 120, 160, 25);
         
-        // Draw border
-        context.strokeStyle = zone.color;
-        context.lineWidth = 3;
-        context.beginPath();
-        context.arc(screenX, screenY, zone.radius, 0, Math.PI * 2);
-        context.stroke();
-        
-        // Draw pulsing inner circle
-        const pulseRadius = zone.radius * 0.6 + Math.sin(state.frameCount * 0.05) * 10;
-        context.fillStyle = 'rgba(255, 255, 255, 0.3)';
-        context.beginPath();
-        context.arc(screenX, screenY, pulseRadius, 0, Math.PI * 2);
-        context.fill();
-        
-        // Draw name above
         context.fillStyle = zone.color;
         context.font = 'bold 14px "JetBrains Mono"';
         context.textAlign = 'center';
-        context.fillText(zone.name, screenX, screenY - zone.radius - 15);
+        context.fillText(zone.name, screenX, screenY - 100);
         
         // Draw interaction hint if player is near
         const worldX = state.player.position.x - state.background.x;
@@ -411,10 +527,13 @@ function Game({ roomCode, username, isHost, onLeave }) {
           Math.pow(worldY - centerY, 2)
         );
         
-        if (distance < zone.radius + 100) {
+        if (distance < 100) {
+          context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          context.fillRect(screenX - 60, screenY + 80, 120, 20);
+          
           context.fillStyle = '#39ff14';
-          context.font = '12px "JetBrains Mono"';
-          context.fillText('[E] Talk', screenX, screenY + zone.radius + 25);
+          context.font = 'bold 12px "JetBrains Mono"';
+          context.fillText('[E] Talk', screenX, screenY + 95);
         }
       });
 
@@ -425,8 +544,8 @@ function Game({ roomCode, username, isHost, onLeave }) {
         const screenX = centerX + state.background.x;
         const screenY = centerY + state.background.y;
         
-        const hasItem = inventory.includes(zone.requiredItem);
-        const isCompleted = completedActions.includes(actionId);
+        const hasItem = inventoryRef.current.includes(zone.requiredItem);
+        const isCompleted = completedActionsRef.current.includes(actionId);
         const zoneColor = isCompleted ? '#888888' : (hasItem ? zone.color : '#666666');
         const opacity = isCompleted ? '30' : (hasItem ? '60' : '40');
         
@@ -572,10 +691,12 @@ function Game({ roomCode, username, isHost, onLeave }) {
       const worldX = state.player.position.x - state.background.x;
       const worldY = state.player.position.y - state.background.y;
       const nearby = checkNPCProximity(worldX, worldY);
+      nearbyNPCRef.current = nearby;
       setNearbyNPC(nearby);
 
       // Check action zone proximity
       const nearbyActionZone = checkActionProximity(worldX, worldY);
+      nearbyActionRef.current = nearbyActionZone;
       setNearbyAction(nearbyActionZone);
 
       if (moved || state.frameCount % 30 === 0) {
@@ -676,7 +797,7 @@ function Game({ roomCode, username, isHost, onLeave }) {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [gameStarted, roomCode, username, nearbyNPC, nearbyAction, inventory, completedActions]);
+  }, [gameStarted, roomCode, username]);
 
   const handleStartGame = () => {
     socket.emit('startGame', { roomCode });
@@ -841,6 +962,15 @@ function Game({ roomCode, username, isHost, onLeave }) {
 
   return (
     <div className="game">
+      {/* Background Music */}
+      <audio 
+        ref={audioRef}
+        src="/audio/Lights Out (Console Edition) - The Escapists Music Extended [5JKt3rJ95WU].mp3"
+        loop
+        volume="0.3"
+        preload="auto"
+      />
+      
       <div className="game-hud">
         <div className="hud-left">
           <div className="room-info">Room: {roomCode}</div>
@@ -874,22 +1004,37 @@ function Game({ roomCode, username, isHost, onLeave }) {
               }
             </div>
           )}
+          <button 
+            className="btn-music-toggle" 
+            onClick={toggleMusic}
+            title={isMusicPlaying ? 'Mute Music' : 'Play Music'}
+          >
+            {isMusicPlaying ? '🔊' : '🔇'}
+          </button>
           <button className="btn-leave-game" onClick={handleLeave}>Leave</button>
         </div>
       </div>
       <canvas ref={canvasRef} />
       
-      {activeNPC && (
-        <NPCChat
-          socket={socket}
-          roomCode={roomCode}
-          npcId={activeNPC}
-          npcName={activeNPC === 'hardwareClerk' ? 'Hardware Store Clerk' : 
-                   activeNPC === 'policeOfficer' ? 'Police Officer' : 'Border Guard'}
-          location={NPC_ZONES[activeNPC].name}
-          onClose={() => setActiveNPC(null)}
-        />
-      )}
+      {activeNPC && (() => {
+        const npcName = activeNPC === 'hardwareClerk' ? 'Hardware Store Clerk' : 
+                        activeNPC === 'policeOfficer' ? 'Police Officer' : 
+                        activeNPC === 'borderGuard' ? 'Border Guard' : 'Exit Guard';
+        const location = NPC_ZONES[activeNPC].name;
+        
+        return (
+          <NPCChat
+            key={activeNPC}
+            socket={socket}
+            roomCode={roomCode}
+            npcId={activeNPC}
+            npcName={npcName}
+            location={location}
+            username={username}
+            onClose={closeNPCChat}
+          />
+        );
+      })()}
     </div>
   );
 }

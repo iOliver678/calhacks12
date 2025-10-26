@@ -11,7 +11,7 @@ app.use(express.json());
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "http://localhost:5174"],
     methods: ["GET", "POST"]
   }
 });
@@ -50,6 +50,16 @@ const NPCs = {
     name: 'Border Guard',
     location: 'Border Checkpoint',
     systemPrompt: `You are a stern border guard who takes your job VERY seriously. You've been alerted about a bank robbery and are on high alert. You check papers carefully and won't let anyone through without proper documentation or an extremely convincing story. You communicate with the police station. You remember everyone you talk to. Keep responses under 100 words.`,
+    inventory: [],
+    conversationHistory: [],
+    pendingMessages: [],
+    responseTimer: null
+  },
+  exitGuard: {
+    id: 'exitGuard',
+    name: 'Exit Guard',
+    location: 'Exit Checkpoint',
+    systemPrompt: `You are a border guard at the exit checkpoint. You take security very seriously and have been warned about the bank robbery. You won't let anyone through without a borderPass or a very convincing story. You are in contact with the main border patrol. Keep responses under 100 words.`,
     inventory: [],
     conversationHistory: [],
     pendingMessages: [],
@@ -231,7 +241,7 @@ async function processNPCResponse(roomCode, npcId) {
     }
 
     // Check for arrest
-    if ((npcId === 'policeOfficer' || npcId === 'borderGuard') &&
+    if ((npcId === 'policeOfficer' || npcId === 'borderGuard' || npcId === 'exitGuard') &&
         (npcResponse.toLowerCase().includes('arrest') || 
          npcResponse.toLowerCase().includes('hands up') ||
          npcResponse.toLowerCase().includes('caught'))) {

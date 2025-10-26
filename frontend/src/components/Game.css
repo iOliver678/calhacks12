@@ -212,6 +212,28 @@
   transform: translateY(-1px);
 }
 
+.btn-music-toggle {
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 18px;
+  border-radius: 6px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+
+.btn-music-toggle:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+  background: rgba(57, 255, 20, 0.05);
+}
+
 canvas {
   border: 1px solid var(--border);
   box-shadow: 
