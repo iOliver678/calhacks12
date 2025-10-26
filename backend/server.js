@@ -3,6 +3,12 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import fetch from 'node-fetch';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 app.use(cors());
@@ -67,9 +73,341 @@ const NPCs = {
   }
 };
 
+// Load collision data
+let collisionBoundaries = [];
+try {
+  const collisionsPath = join(__dirname, '..', 'frontend', 'public', 'data', 'collisions.js');
+  const collisionsText = readFileSync(collisionsPath, 'utf-8');
+  const collisionsMatch = collisionsText.match(/\[([\s\S]*)\]/);
+  if (collisionsMatch) {
+    const collisions = eval('[' + collisionsMatch[1] + ']');
+    const collisionsMap = [];
+    for (let i = 0; i < collisions.length; i += 120) {
+      collisionsMap.push(collisions.slice(i, i + 120));
+    }
+
+    const paddingTiles = 10;
+    const offsetX = 10;
+    const offsetY = 10;
+
+    collisionsMap.forEach((row, i) => {
+      row.forEach((symbol, j) => {
+        if (symbol === 1479 || symbol === 1475) {
+          collisionBoundaries.push({
+            x: (j - paddingTiles + offsetX) * 48,
+            y: (i - paddingTiles + offsetY) * 48,
+            width: 48,
+            height: 48
+          });
+        }
+      });
+    });
+  }
+  console.log(`✅ Loaded ${collisionBoundaries.length} collision boundaries for police AI`);
+} catch (err) {
+  console.log('⚠️ Could not load collisions for police AI:', err.message);
+}
+
+// Check if position collides with boundaries
+function checkPoliceCollision(x, y) {
+  const margin = 60; // Police sprite size
+  for (const boundary of collisionBoundaries) {
+    if (
+      x + margin > boundary.x &&
+      x < boundary.x + boundary.width &&
+      y + margin > boundary.y &&
+      y < boundary.y + boundary.height
+    ) {
+      return true; // Collision detected
+    }
+  }
+  return false; // No collision
+}
+
 // Generate random room code
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+// Spawn 3 police officers to chase players
+function spawnPolice(room, roomCode, io) {
+  const spawnPoint = { x: 2880, y: 2840 }; // Police station spawn
+  
+  room.police = [
+    {
+      id: 'police_0',
+      position: { x: spawnPoint.x, y: spawnPoint.y },
+      speed: 16, // Cascading speeds!
+      sprite: { row: 4, frame: 0 },
+      moving: true,
+      lastPositions: [], // Track recent positions to detect being stuck
+      stuckCounter: 0,
+      lastDistanceToPlayer: Infinity,
+      notAdvancingCounter: 0
+    },
+    {
+      id: 'police_1',
+      position: { x: spawnPoint.x, y: spawnPoint.y + 200 },
+      speed: 17,
+      sprite: { row: 4, frame: 0 },
+      moving: true,
+      lastPositions: [],
+      stuckCounter: 0,
+      lastDistanceToPlayer: Infinity,
+      notAdvancingCounter: 0
+    },
+    {
+      id: 'police_2',
+      position: { x: spawnPoint.x, y: spawnPoint.y + 400 },
+      speed: 18,
+      sprite: { row: 4, frame: 0 },
+      moving: true,
+      lastPositions: [],
+      stuckCounter: 0
+    }
+  ];
+
+  console.log(`🚨 [POLICE] Spawned ${room.police.length} officers at (2180, 2840)`);
+  room.police.forEach(cop => {
+    console.log(`   👮 ${cop.id} at (${cop.position.x}, ${cop.position.y})`);
+  });
+  
+  // Start police movement AI
+  startPoliceAI(room, roomCode, io);
+}
+
+// Police AI - move toward closest player
+function startPoliceAI(room, roomCode, io) {
+  console.log(`🚨 [POLICE AI] Starting AI loop for room ${roomCode}`);
+  let tickCount = 0;
+  
+  const policeInterval = setInterval(() => {
+    const roomData = rooms.get(roomCode);
+    tickCount++;
+    
+    // Stop if room doesn't exist or chase ended
+    if (!roomData || !roomData.isBeingChased) {
+      console.log(`🚨 [POLICE AI] Stopping - room gone or chase ended`);
+      clearInterval(policeInterval);
+      return;
+    }
+
+    // Stop if game is over
+    if (roomData.gameWon || roomData.gameLost) {
+      console.log(`🚨 [POLICE AI] Stopping - game over`);
+      clearInterval(policeInterval);
+      return;
+    }
+    
+    // Log every 50 ticks (5 seconds)
+    if (tickCount % 50 === 1) {
+      console.log(`🚨 [POLICE AI] Tick ${tickCount} - ${roomData.police.length} police active`);
+    }
+
+    // Move each police toward closest player
+    roomData.police.forEach(cop => {
+      let closestPlayer = null;
+      let closestDistance = Infinity;
+
+      // Find closest player
+      Object.values(roomData.players).forEach(player => {
+        const distance = Math.sqrt(
+          Math.pow(player.position.x - cop.position.x, 2) +
+          Math.pow(player.position.y - cop.position.y, 2)
+        );
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestPlayer = player;
+        }
+      });
+
+      if (closestPlayer) {
+        // Track position to detect being stuck
+        const oldPos = { x: cop.position.x, y: cop.position.y };
+        
+        // Move toward closest player
+        const dx = closestPlayer.position.x - cop.position.x;
+        const dy = closestPlayer.position.y - cop.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // CHECK IF WE'RE MAKING PROGRESS
+        const progressThreshold = cop.speed * 0.5; // Should advance at least half speed
+        if (cop.lastDistanceToPlayer !== Infinity) {
+          const distanceReduction = cop.lastDistanceToPlayer - distance;
+          
+          if (distanceReduction < progressThreshold) {
+            // Not making good progress!
+            cop.notAdvancingCounter++;
+            if (cop.notAdvancingCounter === 3) {
+              console.log(`⚠️ ${cop.id} not advancing (counter: ${cop.notAdvancingCounter}) - forcing alternative path!`);
+            }
+          } else {
+            // Making good progress, reset counter
+            if (cop.notAdvancingCounter > 0) {
+              console.log(`✅ ${cop.id} making progress again! (was stuck for ${cop.notAdvancingCounter} ticks)`);
+            }
+            cop.notAdvancingCounter = Math.max(0, cop.notAdvancingCounter - 1);
+          }
+        }
+        
+        cop.lastDistanceToPlayer = distance;
+
+        if (distance > 0) {
+          // Calculate new position
+          const newX = cop.position.x + (dx / distance) * cop.speed;
+          const newY = cop.position.y + (dy / distance) * cop.speed;
+
+          // ADVANCED PATHFINDING
+          let moved = false;
+          
+          // If not advancing for 3+ ticks, FORCE alternative path immediately
+          const forceAlternative = cop.notAdvancingCounter >= 3;
+          
+          if (!forceAlternative) {
+            // 1. Try direct diagonal movement
+            if (!checkPoliceCollision(newX, newY)) {
+              cop.position.x = newX;
+              cop.position.y = newY;
+              moved = true;
+            }
+            // 2. Try dominant direction
+            else if (Math.abs(dx) > Math.abs(dy)) {
+              if (!checkPoliceCollision(newX, cop.position.y)) {
+                cop.position.x = newX;
+                moved = true;
+              } else if (!checkPoliceCollision(cop.position.x, newY)) {
+                cop.position.y = newY;
+                moved = true;
+              }
+            } else {
+              if (!checkPoliceCollision(cop.position.x, newY)) {
+                cop.position.y = newY;
+                moved = true;
+              } else if (!checkPoliceCollision(newX, cop.position.y)) {
+                cop.position.x = newX;
+                moved = true;
+              }
+            }
+          }
+          
+          // 3. Try 8-directional search (diagonals + cardinals)
+          // Use wider radius if we're stuck
+          if (!moved || forceAlternative) {
+            const searchRadius = forceAlternative ? cop.speed * 4 : cop.speed * 2;
+            const searchMoves = [
+              // Cardinals
+              { x: cop.position.x + searchRadius, y: cop.position.y },
+              { x: cop.position.x - searchRadius, y: cop.position.y },
+              { x: cop.position.x, y: cop.position.y + searchRadius },
+              { x: cop.position.x, y: cop.position.y - searchRadius },
+              // Diagonals
+              { x: cop.position.x + searchRadius, y: cop.position.y + searchRadius },
+              { x: cop.position.x - searchRadius, y: cop.position.y + searchRadius },
+              { x: cop.position.x + searchRadius, y: cop.position.y - searchRadius },
+              { x: cop.position.x - searchRadius, y: cop.position.y - searchRadius }
+            ];
+            
+            let bestMove = null;
+            let bestDistance = Infinity;
+            
+            for (const move of searchMoves) {
+              if (!checkPoliceCollision(move.x, move.y)) {
+                const dist = Math.sqrt(
+                  Math.pow(closestPlayer.position.x - move.x, 2) +
+                  Math.pow(closestPlayer.position.y - move.y, 2)
+                );
+                if (dist < bestDistance) {
+                  bestDistance = dist;
+                  bestMove = move;
+                }
+              }
+            }
+            
+            if (bestMove) {
+              cop.position.x = bestMove.x;
+              cop.position.y = bestMove.y;
+              moved = true;
+            }
+          }
+          
+          // 4. If STILL stuck, try aggressive random exploration
+          if (!moved) {
+            cop.stuckCounter++;
+            
+            // Activate exploration faster if not advancing
+            const explorationThreshold = cop.notAdvancingCounter >= 5 ? 2 : 5;
+            
+            if (cop.stuckCounter > explorationThreshold) {
+              // Explore randomly to get unstuck - very wide radius
+              const exploreRadius = cop.speed * 5;
+              const randomMoves = [];
+              
+              // Try 16 directions for better coverage
+              for (let i = 0; i < 16; i++) {
+                const angle = (Math.PI * 2 * i) / 16;
+                randomMoves.push({
+                  x: cop.position.x + Math.cos(angle) * exploreRadius,
+                  y: cop.position.y + Math.sin(angle) * exploreRadius
+                });
+                // Also try half-radius for finer navigation
+                randomMoves.push({
+                  x: cop.position.x + Math.cos(angle) * (exploreRadius / 2),
+                  y: cop.position.y + Math.sin(angle) * (exploreRadius / 2)
+                });
+              }
+              
+              // Shuffle and try random moves
+              randomMoves.sort(() => Math.random() - 0.5);
+              
+              for (const move of randomMoves) {
+                if (!checkPoliceCollision(move.x, move.y)) {
+                  cop.position.x = move.x;
+                  cop.position.y = move.y;
+                  moved = true;
+                  cop.stuckCounter = 0; // Reset stuck counter
+                  cop.notAdvancingCounter = Math.max(0, cop.notAdvancingCounter - 2); // Reward finding path
+                  console.log(`👮 ${cop.id} found alternative route via exploration!`);
+                  break;
+                }
+              }
+            }
+          } else {
+            // Successfully moved, reset stuck counter
+            cop.stuckCounter = 0;
+          }
+
+          // Update sprite direction
+          const actualDx = cop.position.x - oldPos.x;
+          const actualDy = cop.position.y - oldPos.y;
+          
+          if (Math.abs(actualDx) > Math.abs(actualDy) && Math.abs(actualDx) > 0.1) {
+            cop.sprite.row = actualDx > 0 ? 6 : 5;
+          } else if (Math.abs(actualDy) > 0.1) {
+            cop.sprite.row = actualDy > 0 ? 4 : 7;
+          }
+
+          // Animate sprite
+          cop.sprite.frame = (cop.sprite.frame + 1) % 4;
+        }
+
+        // Check if caught (within 30 pixels - basically collision)
+        if (distance < 30) {
+          console.log(`🚨 [POLICE] ${cop.id} CAUGHT PLAYER! Distance: ${Math.round(distance)}px`);
+          console.log(`   👮 Cop at (${Math.round(cop.position.x)}, ${Math.round(cop.position.y)})`);
+          console.log(`   🏃 Player at (${Math.round(closestPlayer.position.x)}, ${Math.round(closestPlayer.position.y)})`);
+          roomData.gameLost = true;
+          roomData.arrested = true;
+          clearInterval(policeInterval);
+          io.to(roomCode).emit('gameOver', { won: false, reason: 'caught' });
+          return;
+        }
+      }
+    });
+
+    // Broadcast police positions
+    io.to(roomCode).emit('policeUpdate', { police: roomData.police });
+  }, 100); // Update 10 times per second
 }
 
 // Chat with JLLM API
@@ -240,14 +578,30 @@ async function processNPCResponse(roomCode, npcId) {
       }
     }
 
-    // Check for arrest
-    if ((npcId === 'policeOfficer' || npcId === 'borderGuard' || npcId === 'exitGuard') &&
-        (npcResponse.toLowerCase().includes('arrest') || 
-         npcResponse.toLowerCase().includes('hands up') ||
-         npcResponse.toLowerCase().includes('caught'))) {
-      room.arrested = true;
-      room.gameLost = true;
-      io.to(roomCode).emit('gameOver', { won: false, reason: 'arrested' });
+    // Check for arrest - spawn police chase instead of instant game over
+    const response = npcResponse.toLowerCase();
+    const triggerWords = [
+      'arrest', 'hands up', 'caught', 'backup', 'requesting backup',
+      'police are on', 'detained', 'remain here', 'stay here', 
+      'not going anywhere', 'wait for police', 'units en route'
+    ];
+    
+    const isTriggered = (npcId === 'policeOfficer' || npcId === 'borderGuard' || npcId === 'exitGuard') &&
+                        triggerWords.some(word => response.includes(word));
+    
+    if (isTriggered) {
+      if (!room.isBeingChased) {
+        console.log(`🚨 [CHASE] Triggered by ${npcId}! NPC said: "${npcResponse.substring(0, 80)}..."`);
+        room.isBeingChased = true;
+        spawnPolice(room, roomCode, io);
+        io.to(roomCode).emit('chaseStarted', { message: '🚨 POLICE CHASE INITIATED! RUN!' });
+        console.log(`🚨 [CHASE] Chase started event sent to room ${roomCode}`);
+      } else {
+        console.log(`🚨 [CHASE] Already being chased, ignoring new trigger from ${npcId}`);
+      }
+    } else if (npcId === 'policeOfficer' || npcId === 'borderGuard' || npcId === 'exitGuard') {
+      // Log when these NPCs respond but don't trigger
+      console.log(`ℹ️ [CHASE] ${npcId} responded but no trigger words found: "${npcResponse.substring(0, 80)}..."`);
     }
 
     // Check win condition
@@ -303,7 +657,9 @@ io.on('connection', (socket) => {
       gameWon: false,
       gameLost: false,
       completedActions: [], // Track which action zones have been used
-      borderPassGranted: false // Track if border guard approved passage
+      borderPassGranted: false, // Track if border guard approved passage
+      isBeingChased: false, // Police chase active
+      police: [] // Array of police NPCs chasing players
     };
     
     rooms.set(roomCode, room);
