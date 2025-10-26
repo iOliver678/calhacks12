@@ -11,7 +11,7 @@ for (let i = 0; i < collisions.length; i+= 120){
 
 const offset = {
     x: -2370,
-    y: -2800,
+    y: -2600,
 }
 
 const mapWidth = 5760;  // 120 cells * 48 pixels
