@@ -80,6 +80,7 @@ const ACTION_ZONES = {
 function Game({ roomCode, username, isHost, onLeave }) {
   const canvasRef = useRef(null);
   const audioRef = useRef(null);
+  const chaseMusicRef = useRef(null);
   const [gameStarted, setGameStarted] = useState(false);
   const [players, setPlayers] = useState({});
   const [waitingForPlayers, setWaitingForPlayers] = useState(true);
@@ -97,6 +98,8 @@ function Game({ roomCode, username, isHost, onLeave }) {
   const [completedActions, setCompletedActions] = useState([]);
   const [winningAction, setWinningAction] = useState(null);
   const [winningPlayer, setWinningPlayer] = useState(null);
+  const [police, setPolice] = useState([]);
+  const [isBeingChased, setIsBeingChased] = useState(false);
   
   // Refs to access current values without restarting animation loop
   const inventoryRef = useRef([]);
@@ -104,6 +107,8 @@ function Game({ roomCode, username, isHost, onLeave }) {
   const nearbyNPCRef = useRef(null);
   const nearbyActionRef = useRef(null);
   const activeNPCRef = useRef(null);
+  const policeRef = useRef([]);
+  const isBeingChasedRef = useRef(false);
   
   const gameStateRef = useRef({
     background: { x: -2370, y: -2600 },
@@ -183,6 +188,42 @@ function Game({ roomCode, username, isHost, onLeave }) {
 
     socket.on('gameOver', ({ won, reason }) => {
       setGameOver({ won, reason });
+      
+      // Switch back to regular music on game over
+      if (chaseMusicRef.current && audioRef.current) {
+        chaseMusicRef.current.pause();
+        // Optionally restart regular music
+        // audioRef.current.currentTime = 0;
+        // audioRef.current.play().catch(err => console.log('Music play prevented:', err));
+      }
+    });
+
+    socket.on('chaseStarted', ({ message }) => {
+      console.log('🚨 [FRONTEND] Chase started event received!');
+      setIsBeingChased(true);
+      isBeingChasedRef.current = true;
+      showNotification(message);
+      console.log('🚨 [FRONTEND] Chase state set to TRUE');
+      
+      // Switch to chase music!
+      if (audioRef.current && chaseMusicRef.current) {
+        audioRef.current.pause();
+        chaseMusicRef.current.currentTime = 0;
+        chaseMusicRef.current.play().catch(err => {
+          console.log('Chase music play prevented:', err);
+        });
+      }
+    });
+
+    socket.on('policeUpdate', ({ police }) => {
+      if (police.length > 0 && !policeRef.current.length) {
+        console.log(`🚨 [FRONTEND] First police update received: ${police.length} officers`);
+        police.forEach(cop => {
+          console.log(`   👮 ${cop.id} at (${Math.round(cop.position.x)}, ${Math.round(cop.position.y)})`);
+        });
+      }
+      setPolice(police);
+      policeRef.current = police;
     });
 
     return () => {
@@ -194,6 +235,8 @@ function Game({ roomCode, username, isHost, onLeave }) {
       socket.off('actionCompleted');
       socket.off('borderCrossed');
       socket.off('gameOver');
+      socket.off('chaseStarted');
+      socket.off('policeUpdate');
     };
   }, []);
 
@@ -274,15 +317,24 @@ function Game({ roomCode, username, isHost, onLeave }) {
 
   // Background music control
   const toggleMusic = () => {
-    if (!audioRef.current) return;
+    if (!audioRef.current && !chaseMusicRef.current) return;
     
     if (isMusicPlaying) {
-      audioRef.current.pause();
+      // Pause both tracks
+      if (audioRef.current) audioRef.current.pause();
+      if (chaseMusicRef.current) chaseMusicRef.current.pause();
       setIsMusicPlaying(false);
     } else {
-      audioRef.current.play().catch(err => {
-        console.log('Audio play prevented:', err);
-      });
+      // Play the appropriate track
+      if (isBeingChasedRef.current && chaseMusicRef.current) {
+        chaseMusicRef.current.play().catch(err => {
+          console.log('Chase music play prevented:', err);
+        });
+      } else if (audioRef.current) {
+        audioRef.current.play().catch(err => {
+          console.log('Audio play prevented:', err);
+        });
+      }
       setIsMusicPlaying(true);
     }
   };
@@ -345,12 +397,17 @@ function Game({ roomCode, username, isHost, onLeave }) {
     
     const exitGuardImage = new Image();
     exitGuardImage.src = '/img/soldier.png';
+    
+    // Police chase sprite (separate from NPC)
+    const policemanImage = new Image();
+    policemanImage.src = '/img/policeman.png';
 
     state.images = { 
       mapImage, 
       foregroundImage, 
       playerImage, 
-      npcImage 
+      npcImage,
+      policeman: policemanImage  // Add police chase sprite
     };
     
     // Store custom images per NPC
@@ -749,6 +806,48 @@ function Game({ roomCode, username, isHost, onLeave }) {
         }
       });
 
+      // Draw police chasing players
+      if (policeRef.current && policeRef.current.length > 0) {
+        if (state.frameCount % 60 === 0) {
+          console.log(`🚨 [RENDER] Drawing ${policeRef.current.length} police officers`);
+        }
+        policeRef.current.forEach(cop => {
+          const screenX = cop.position.x + state.background.x;
+          const screenY = cop.position.y + state.background.y;
+          
+          const spriteWidth = 32;
+          const spriteHeight = 32;
+          const scale = 4;
+
+          // Draw police sprite (or fallback circle)
+          if (state.images.policeman && state.images.policeman.complete) {
+            context.drawImage(
+              state.images.policeman,
+              (cop.sprite?.frame || 0) * spriteWidth,
+              (cop.sprite?.row || 0) * spriteHeight,
+              spriteWidth,
+              spriteHeight,
+              screenX,
+              screenY,
+              spriteWidth * scale,
+              spriteHeight * scale
+            );
+          } else {
+            // Fallback: draw blue circle if sprite not loaded
+            context.fillStyle = 'rgba(0, 100, 255, 0.8)';
+            context.beginPath();
+            context.arc(screenX + 64, screenY + 64, 60, 0, Math.PI * 2);
+            context.fill();
+          }
+
+          // Police label
+          context.fillStyle = 'red';
+          context.font = 'bold 18px Arial';
+          context.textAlign = 'center';
+          context.fillText('🚨 POLICE', screenX + 64, screenY - 10);
+        });
+      }
+
       if (state.images.playerImage.complete) {
         const spriteWidth = 32;
         const spriteHeight = 32;
@@ -774,6 +873,13 @@ function Game({ roomCode, username, isHost, onLeave }) {
 
       if (state.images.foregroundImage.complete) {
         context.drawImage(state.images.foregroundImage, state.foreground.x, state.foreground.y);
+      }
+
+      // Red screen flash effect when being chased
+      if (isBeingChasedRef.current) {
+        const pulseIntensity = Math.sin(state.frameCount / 10) * 0.15 + 0.15;
+        context.fillStyle = `rgba(255, 0, 0, ${pulseIntensity})`;
+        context.fillRect(0, 0, canvas.width, canvas.height);
       }
 
       // Debug: Draw player world position in bottom left
@@ -971,7 +1077,21 @@ function Game({ roomCode, username, isHost, onLeave }) {
         preload="auto"
       />
       
+      {/* Chase Music */}
+      <audio 
+        ref={chaseMusicRef}
+        src="/audio/The Escapists 2 Music - Lockdown.mp3"
+        loop
+        volume="0.4"
+        preload="auto"
+      />
+      
       <div className="game-hud">
+        {isBeingChased && (
+          <div className="chase-warning">
+            🚨 POLICE CHASE ACTIVE - RUN! 🚨
+          </div>
+        )}
         <div className="hud-left">
           <div className="room-info">Room: {roomCode}</div>
           <div className="inventory">
